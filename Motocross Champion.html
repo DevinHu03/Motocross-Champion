@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=800, initial-scale=1.0">
+    <title>2D 摩托车游戏</title>
+    <style>
+        body {
+            margin: 0;
+            background: #222;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        #gameCanvas {
+            border: 2px solid #333;
+            background: linear-gradient(to top, #b3e0ff 0%, #e6f7ff 100%);
+            box-shadow: 0 0 16px #2228;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 22px;
+            text-shadow: 1px 2px 4px #000a;
+            z-index: 2;
+            pointer-events: none;
+        }
+        #menu {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.7);
+            z-index: 10;
+        }
+        #menu button {
+            margin: 10px;
+            padding: 12px 32px;
+            font-size: 20px;
+            border: none;
+            border-radius: 8px;
+            background: #ff4444;
+            color: #fff;
+            cursor: pointer;
+            box-shadow: 0 2px 8px #0005;
+            transition: background 0.2s;
+        }
+        #menu button:hover {
+            background: #ff8800;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <div id="ui"></div>
+    <div id="menu">
+        <h1 style="color:#fff;">2D 摩托车游戏</h1>
+        <button id="startBtn">开始游戏</button>
+        <button id="levelBtn">选择关卡</button>
+        <button id="exitBtn">退出</button>
+        <div style="color:#ccc;margin-top:20px;">空格跳跃，左右键平衡</div>
+    </div>
+    <script>
+    // --- 地形 ---
+    class Terrain {
+        constructor(seed, amplitude, length) {
+            this.length = length;
+            this.seed = seed;
+            this.amplitude = amplitude;
+            this.points = [];
+            for (let i = 0; i <= length; i++) {
+                this.points[i] = 300
+                    + Math.sin(i * seed) * amplitude
+                    + Math.sin(i * seed * 0.5) * amplitude * 0.3
+                    + Math.sin(i * seed * 0.13) * amplitude * 0.15;
+            }
+            this.cameraX = 0;
+        }
+        getY(x) {
+            const i = Math.floor(x);
+            if (i < 0 || i > this.length) return 400;
+            return this.points[i];
+        }
+        getAngle(x) {
+            const i = Math.floor(x);
+            if (i < 1 || i > this.length-1) return 0;
+            return Math.atan2(this.points[i+1] - this.points[i-1], 2);
+        }
+        draw(ctx, bikeX) {
+            this.cameraX = Math.max(0, bikeX - 200);
+            ctx.save();
+            ctx.translate(-this.cameraX, 0);
+            // --- 远景山脉 ---
+            ctx.save();
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(0, 320);
+            for (let i = 0; i < this.points.length; i+=8) {
+                ctx.lineTo(i, 320 + Math.sin(i*0.008) * 30 + Math.cos(i*0.015) * 18);
+            }
+            ctx.lineTo(this.length, 400);
+            ctx.lineTo(0, 400);
+            ctx.closePath();
+            ctx.fillStyle = 'linear-gradient(#b0c4de,#e0eafc)';
+            ctx.fillStyle = '#b0c4de';
+            ctx.fill();
+            ctx.restore();
+            // --- 地形主轮廓 ---
+            ctx.beginPath();
+            ctx.moveTo(0, this.points[0]);
+            for (let i = 1; i < this.points.length; i++) {
+                ctx.lineTo(i, this.points[i]);
+            }
+            ctx.lineTo(this.length, 400);
+            ctx.lineTo(0, 400);
+            ctx.closePath();
+            // 地面渐变
+            let grd = ctx.createLinearGradient(0, 250, 0, 400);
+            grd.addColorStop(0, '#8d6e63');
+            grd.addColorStop(1, '#4e342e');
+            ctx.fillStyle = grd;
+            ctx.shadowColor = '#000a';
+            ctx.shadowBlur = 16;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            // 草地
+            ctx.beginPath();
+            ctx.moveTo(0, this.points[0]-2);
+            for (let i = 1; i < this.points.length; i++) {
+                ctx.lineTo(i, this.points[i]-2);
+            }
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = '#5eea5e';
+            ctx.shadowColor = '#5eea5e88';
+            ctx.shadowBlur = 8;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            // 草丛点缀
+            for (let i = 30; i < this.length; i += 120) {
+                let y = this.points[i]-8;
+                ctx.beginPath();
+                ctx.arc(i, y, 7, 0, Math.PI*2);
+                ctx.fillStyle = '#4caf50';
+                ctx.globalAlpha = 0.7;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+            // 石块点缀
+            for (let i = 80; i < this.length; i += 260) {
+                let y = this.points[i]+8;
+                ctx.save();
+                ctx.translate(i, y);
+                ctx.rotate(Math.random()*Math.PI);
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 10, 5, 0, 0, Math.PI*2);
+                ctx.fillStyle = '#bbb';
+                ctx.globalAlpha = 0.5;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+                ctx.restore();
+            }
+            ctx.restore();
+        }
+    }
+
+    // --- 摩托车 ---
+    class Bike {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            this.speed = 0;
+            this.maxSpeed = 7;
+            this.acceleration = 0.28;
+            this.vy = 0;
+            this.rotation = 0;
+            this.vr = 0;
+            this.isJumping = false;
+            this.jumpPower = -13;
+            this.gravity = 0.7;
+            this.friction = 0.96;
+            this.airFriction = 0.992;
+            this.wheelRadius = 12;
+            this.bodyWidth = 44;
+            this.bodyHeight = 18;
+            this.color = '#ff4444';
+            this.moveLeft = false;
+            this.moveRight = false;
+        }
+        update(terrain, dt) {
+            // 玩家控制加速/减速
+            if (!this.isJumping) {
+                if (this.moveLeft) {
+                    this.speed -= this.acceleration * dt;
+                }
+                if (this.moveRight) {
+                    this.speed += this.acceleration * dt;
+                }
+                // 限制最大速度
+                if (this.speed > this.maxSpeed) this.speed = this.maxSpeed;
+                if (this.speed < -this.maxSpeed) this.speed = -this.maxSpeed;
+                // 地面摩擦
+                if (!this.moveLeft && !this.moveRight) {
+                    this.speed *= this.friction;
+                    if (Math.abs(this.speed) < 0.05) this.speed = 0;
+                }
+            }
+            // 水平移动
+            this.x += this.speed * dt;
+            // 垂直移动
+            this.vy += this.gravity * dt;
+            this.y += this.vy * dt;
+            // 空气阻力
+            if (this.isJumping) {
+                this.vr *= this.airFriction;
+                this.vy *= this.airFriction;
+            }
+            // 地面检测
+            const groundY = terrain.getY(this.x);
+            let crashed = false;
+            if (this.y + this.bodyHeight/2 >= groundY) {
+                this.y = groundY - this.bodyHeight/2;
+                const angle = terrain.getAngle(this.x);
+                const deg = Math.abs((this.rotation - angle) * 180 / Math.PI);
+                if (deg > 55 || Math.abs(this.vy) > 15) {
+                    crashed = true;
+                }
+                this.vy = 0;
+                this.isJumping = false;
+                // 地面摩擦
+                this.speed *= this.friction;
+                // 地形角度自动校正
+                this.rotation += (angle - this.rotation) * 0.25;
+                this.vr *= 0.6;
+            } else {
+                this.isJumping = true;
+            }
+            // 旋转惯性
+            this.rotation += this.vr * dt;
+            this.vr *= 0.985;
+            if (this.rotation > Math.PI) this.rotation -= Math.PI*2;
+            if (this.rotation < -Math.PI) this.rotation += Math.PI*2;
+            if (crashed && typeof this.onCrash === 'function') {
+                this.onCrash();
+            }
+        }
+        jump() {
+            if (!this.isJumping) {
+                // 跳跃力度与速度相关，速度越快跳得越远
+                this.vy = this.jumpPower - Math.abs(this.speed) * 0.45;
+                this.isJumping = true;
+            }
+        }
+        tilt(dir) {
+            this.vr += dir * 0.08;
+        }
+        draw(ctx, terrain) {
+            ctx.save();
+            ctx.translate(this.x - terrain.cameraX, this.y);
+            ctx.rotate(this.rotation);
+            // 车身渐变
+            let grd = ctx.createLinearGradient(-this.bodyWidth/2, 0, this.bodyWidth/2, 0);
+            grd.addColorStop(0, '#ff4444');
+            grd.addColorStop(1, '#ffbb44');
+            ctx.fillStyle = grd;
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = '#ff444488';
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.moveTo(-this.bodyWidth/2, -this.bodyHeight/2);
+            ctx.lineTo(this.bodyWidth/2, -this.bodyHeight/2+4);
+            ctx.lineTo(this.bodyWidth/2, this.bodyHeight/2);
+            ctx.lineTo(-this.bodyWidth/2, this.bodyHeight/2-4);
+            ctx.closePath();
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.stroke();
+            // 轮子
+            for (let dx of [-this.bodyWidth/2+10, this.bodyWidth/2-10]) {
+                ctx.save();
+                ctx.translate(dx, this.bodyHeight/2);
+                ctx.beginPath();
+                ctx.arc(0, 0, this.wheelRadius, 0, Math.PI*2);
+                ctx.fillStyle = '#222';
+                ctx.shadowColor = '#000a';
+                ctx.shadowBlur = 6;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                // 轮辐
+                ctx.strokeStyle = '#aaa';
+                ctx.lineWidth = 2;
+                for (let i = 0; i < 6; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(Math.cos(i*Math.PI/3)*this.wheelRadius, Math.sin(i*Math.PI/3)*this.wheelRadius);
+                    ctx.stroke();
+                }
+                // 轮圈高光
+                ctx.beginPath();
+                ctx.arc(0, 0, this.wheelRadius-2, -Math.PI/4, Math.PI/4);
+                ctx.strokeStyle = '#fff8';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
+            }
+            // 头盔
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(0, -this.bodyHeight/2, 10, 0, Math.PI*2);
+            ctx.fillStyle = ctx.createRadialGradient(0, -this.bodyHeight/2, 2, 0, -this.bodyHeight/2, 10);
+            ctx.fillStyle.addColorStop?.(0, '#fff');
+            ctx.fillStyle.addColorStop?.(1, '#bbb');
+            ctx.fill();
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.restore();
+            ctx.restore();
+        }
+    }
+
+    // --- 游戏主结构 ---
+    class Game {
+        constructor(canvas, ui, menu) {
+            this.canvas = canvas;
+            this.ctx = canvas.getContext('2d');
+            this.ui = ui;
+            this.menu = menu;
+            this.state = 'menu';
+            this.level = 0;
+            this.levels = [
+                { name: '新手关', seed: 0.018, amplitude: 28, length: 3000 },
+                { name: '挑战关', seed: 0.032, amplitude: 48, length: 4000 },
+                { name: '极限关', seed: 0.055, amplitude: 70, length: 5000 }
+            ];
+            this.bike = null;
+            this.terrain = null;
+            this.score = 0;
+            this.lives = 3;
+            this.paused = false;
+            this.bindMenu();
+            this.setupControls();
+            this.renderMenu();
+        }
+        bindMenu() {
+            document.getElementById('startBtn').onclick = () => {
+                this.level = 0;
+                this.startGame();
+            };
+            document.getElementById('levelBtn').onclick = () => {
+                this.level = (this.level + 1) % this.levels.length;
+                this.renderMenu();
+            };
+            document.getElementById('exitBtn').onclick = () => {
+                window.close();
+            };
+        }
+        setupControls() {
+            document.addEventListener('keydown', (e) => {
+                if (this.state !== 'playing') return;
+                if (e.code === 'Space' && !this.bike.isJumping) {
+                    this.bike.jump();
+                }
+                if (e.code === 'ArrowLeft') {
+                    this.bike.moveLeft = true;
+                }
+                if (e.code === 'ArrowRight') {
+                    this.bike.moveRight = true;
+                }
+                if (e.code === 'KeyA') {
+                    this.bike.tilt(-1);
+                }
+                if (e.code === 'KeyD') {
+                    this.bike.tilt(1);
+                }
+                if (e.code === 'KeyP') {
+                    this.togglePause();
+                }
+            });
+            document.addEventListener('keyup', (e) => {
+                if (this.state !== 'playing') return;
+                if (e.code === 'ArrowLeft') {
+                    this.bike.moveLeft = false;
+                }
+                if (e.code === 'ArrowRight') {
+                    this.bike.moveRight = false;
+                }
+            });
+        }
+        renderMenu() {
+            this.menu.style.display = 'flex';
+            this.menu.querySelector('h1').textContent = '2D 摩托车游戏 - ' + this.levels[this.level].name;
+        }
+        startGame() {
+            this.menu.style.display = 'none';
+            this.state = 'playing';
+            this.score = 0;
+            this.lives = 3;
+            const lv = this.levels[this.level];
+            this.bike = new Bike(100, 200);
+            // 摔倒回调
+            this.bike.onCrash = () => {
+                this.lives--;
+                if (this.lives <= 0) {
+                    this.gameOver();
+                } else {
+                    const lv = this.levels[this.level];
+                    this.bike = new Bike(100, 200);
+                    this.bike.onCrash = this.bike.onCrash;
+                }
+            };
+            this.terrain = new Terrain(lv.seed, lv.amplitude, lv.length);
+            this.lastFrame = performance.now();
+            this.gameLoop();
+        }
+        togglePause() {
+            if (this.state !== 'playing') return;
+            this.paused = !this.paused;
+            if (!this.paused) this.gameLoop();
+        }
+        gameOver() {
+            this.state = 'gameover';
+            this.menu.style.display = 'flex';
+            this.menu.querySelector('h1').textContent = '游戏结束! 得分: ' + this.score;
+        }
+        update(dt) {
+            if (this.paused) return;
+            this.bike.update(this.terrain, dt);
+            if (this.bike.x > this.terrain.length) {
+                this.score += 1000;
+                this.level = (this.level + 1) % this.levels.length;
+                this.startGame();
+            }
+            if (this.bike.y > this.canvas.height + 50) {
+                this.lives--;
+                if (this.lives <= 0) {
+                    this.gameOver();
+                } else {
+                    const lv = this.levels[this.level];
+                    this.bike = new Bike(100, 200, 0);
+                }
+            }
+            this.score += Math.floor(this.bike.speed);
+        }
+        render() {
+            // 天空渐变
+            let sky = this.ctx.createLinearGradient(0, 0, 0, this.canvas.height);
+            sky.addColorStop(0, '#aeefff');
+            sky.addColorStop(1, '#e6f7ff');
+            this.ctx.fillStyle = sky;
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            // 云朵
+            for (let i = 0; i < 4; i++) {
+                let cx = (this.bike.x/2 + i*220) % (this.canvas.width+200) - 100;
+                let cy = 60 + Math.sin(i*1.2+this.bike.x*0.002)*10;
+                this.ctx.save();
+                this.ctx.globalAlpha = 0.5;
+                this.ctx.beginPath();
+                this.ctx.ellipse(cx, cy, 50, 18, 0, 0, Math.PI*2);
+                this.ctx.ellipse(cx+30, cy+8, 30, 12, 0, 0, Math.PI*2);
+                this.ctx.ellipse(cx-30, cy+8, 30, 12, 0, 0, Math.PI*2);
+                this.ctx.fillStyle = '#fff';
+                this.ctx.fill();
+                this.ctx.restore();
+            }
+            this.terrain.draw(this.ctx, this.bike.x);
+            this.bike.draw(this.ctx, this.terrain);
+            // UI美化
+            this.ui.innerHTML = `<span style="font-family:'Segoe UI',Arial,sans-serif;font-size:24px;text-shadow:2px 2px 8px #000a;letter-spacing:1px;">分数: <b style='color:#ffe066'>${this.score}</b> &nbsp; 生命: <b style='color:#ff6666'>${this.lives}</b> &nbsp; 关卡: <b style='color:#66e'>${this.levels[this.level].name}</b></span>`;
+            if (this.paused) {
+                this.ctx.save();
+                this.ctx.globalAlpha = 0.7;
+                this.ctx.fillStyle = '#000';
+                this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height);
+                this.ctx.globalAlpha = 1;
+                this.ctx.fillStyle = '#fff';
+                this.ctx.font = '48px Arial Black,Arial,sans-serif';
+                this.ctx.textAlign = 'center';
+                this.ctx.shadowColor = '#000a';
+                this.ctx.shadowBlur = 12;
+                this.ctx.fillText('暂停', this.canvas.width/2, this.canvas.height/2);
+                this.ctx.restore();
+            }
+        }
+        gameLoop() {
+            if (this.state !== 'playing') return;
+            const now = performance.now();
+            const dt = Math.min((now - this.lastFrame) / 16, 2);
+            this.lastFrame = now;
+            this.update(dt);
+            this.render();
+            if (!this.paused) requestAnimationFrame(() => this.gameLoop());
+        }
+    }
+
+    // --- 启动游戏 ---
+    const canvas = document.getElementById('gameCanvas');
+    const ui = document.getElementById('ui');
+    const menu = document.getElementById('menu');
+    const game = new Game(canvas, ui, menu);
+    </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Motorcycle Game</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        }
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: #f0f0f0;
+        }
+        .controls {
+            margin-top: 20px;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <div class="controls">Press SPACE to jump</div>
+    <script>
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.bike = new Bike();
+                this.terrain = new Terrain(this.canvas.width);
+                this.setupControls();
+                this.gameLoop();
+            }
+
+            setupControls() {
+                document.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space' && !this.bike.isJumping) {
+                        this.bike.jump();
+                    }
+                });
+            }
+
+            setupControls() {
+                document.addEventListener('keydown', (e) => {
+                    if (this.state !== 'playing') return;
+                    if (e.code === 'Space' && !this.bike.isJumping) {
+                        this.bike.jump();
+                    }
+                    if (e.code === 'ArrowLeft') {
+                        this.bike.moveLeft = true;
+                    }
+                    if (e.code === 'ArrowRight') {
+                        this.bike.moveRight = true;
+                    }
+                    if (e.code === 'KeyA') {
+                        this.bike.tilt(-1);
+                    }
+                    if (e.code === 'KeyD') {
+                        this.bike.tilt(1);
+                    }
+                    if (e.code === 'KeyP') {
+                        this.togglePause();
+                    }
+                });
+                document.addEventListener('keyup', (e) => {
+                    if (this.state !== 'playing') return;
+                    if (e.code === 'ArrowLeft') {
+                        this.bike.moveLeft = false;
+                    }
+                    if (e.code === 'ArrowRight') {
+                        this.bike.moveRight = false;
+                    }
+                });
+            }
+                this.color = '#ff4444';
+                this.wheelRadius = 10;
+                this.bodyWidth = 40;
+                this.bodyHeight = 20;
+                this.bodyHeight = 20;
