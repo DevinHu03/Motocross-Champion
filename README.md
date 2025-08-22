@@ -1,1 +1,1 @@
-This is a flat motocross game where you control this motorcycle over many obstacles to reach the end.Press "A" and "D" to control rolling, left and right arrows to control movement, and spacebar to control jumping
+This is a 2D motocross game where you control this motorcycle over many obstacles to reach the end.Press "A" and "D" to control rolling, left and right arrows to control movement, and spacebar to control jumping
